@@ -51,4 +51,8 @@ phases:
           echo "Waiting for $dep to roll out..."
           kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
         done
+<<<<<<< HEAD
         echo "Deployment complete."
+=======
+        echo "Deployment complete."
+>>>>>>> cd338222fa19aac71c6f13e075bafed0ff7367d1
