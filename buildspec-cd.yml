@@ -9,9 +9,9 @@ phases:
     commands:
       - echo "Installing Kustomize..."
       - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-      - if [ -f ./kustomize ]; then sudo mv ./kustomize /usr/local/bin/; else echo "kustomize binary not found!"; exit 1; fi
+      - if [ -f ./kustomize ]; then mv ./kustomize /usr/local/bin/; else echo "kustomize binary not found!"; exit 1; fi
       - echo "Installing jq..."
-      - curl -Lo /usr/local/bin/jq https://github.com/stedolan/jq/releases/latest/download/jq
+      - curl -Lo /usr/local/bin/jq https://github.com/stedolan/jq/releases/latest/download/jq-linux64
       - chmod +x /usr/local/bin/jq
   pre_build:
     commands:
@@ -26,6 +26,12 @@ phases:
           echo "Error: Failed to parse imagedefinitions.json or imageUri missing!"
           exit 1
         }
+        # Make IMAGE_URI available to later phases
+        export IMAGE_URI 
+  build:
+    commands:
+      - echo "Building and applying Kustomize manifests..."
+      - |
         kustomize build k8s/overlays/$K8S_OVERLAY > /tmp/kustomized.yaml
         # Validate that the placeholder exists before replacement
         if ! grep -q "$IMAGE_PLACEHOLDER" /tmp/kustomized.yaml; then
@@ -36,23 +42,12 @@ phases:
         echo "Applying manifests..."
         kubectl apply -n $K8S_NAMESPACE -f /tmp/kustomized.yaml
   post_build:
-        # Wait for all deployments (with and without the app label) to roll out
-        for dep in $(kubectl -n $K8S_NAMESPACE get deployments -o name); do
-          echo "Waiting for $dep to roll out..."
-          kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
-        done
-        echo "Deployment complete."
+    commands:
       - |
-        for dep in $(kubectl -n $K8S_NAMESPACE get deployments -l app=$APP_NAME -o name); do
-          echo "Waiting for $dep to roll out..."
-          kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
-        done
+        echo "Verifying all deployments in namespace $K8S_NAMESPACE..."
         for dep in $(kubectl -n $K8S_NAMESPACE get deployments -o name); do
           echo "Waiting for $dep to roll out..."
           kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
         done
-<<<<<<< HEAD
-        echo "Deployment complete."
-=======
-        echo "Deployment complete."
->>>>>>> cd338222fa19aac71c6f13e075bafed0ff7367d1
+        echo "All deployments complete."
+
