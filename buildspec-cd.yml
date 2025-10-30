@@ -8,28 +8,26 @@ phases:
       - mv kustomize /usr/local/bin/
       - echo "Installing jq..."
       - apt-get update && apt-get install -y jq
-
   pre_build:
     commands:
+      # These $EKS_CLUSTER_NAME, $K8S_OVERLAY, $K8S_NAMESPACE
+      # variables are set in the CodePipeline configuration.
       - echo "Updating kubeconfig for cluster $EKS_CLUSTER_NAME..."
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
       - echo "Parsing image definitions..."
+      # Read the image URI from the artifact passed by the CI stage
       - IMAGE_URI=$(jq -r '.[0].imageUri' imagedefinitions.json)
       - echo "Deploying image: $IMAGE_URI"
-
   build:
     commands:
       - echo "Building Kustomize manifests for overlay $K8S_OVERLAY..."
-      - >
-        kustomize build k8s/overlays/$K8S_OVERLAY |
-        sed "s|YOUR_IMAGE_PLACEHOLDER|$IMAGE_URI|g" |
-        kubectl apply -n $K8S_NAMESPACE -f -
-
+      - |
+        kustomize build k8s/overlays/$K8S_OVERLAY \
+        | sed "s|YOUR_IMAGE_PLACEHOLDER|$IMAGE_URI|g" \
+        | kubectl apply -n $K8S_NAMESPACE -f -
   post_build:
     commands:
       - echo "Verifying deployment..."
-      - >
-        DEPLOYMENT_NAME=$(kustomize build k8s/overlays/$K8S_OVERLAY |
-        kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}')
-        kubectl rollout status deployment/$DEPLOYMENT_NAME -n $K8S_NAMESPACE
+      - |
+        kubectl rollout status deployment/$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}') -n $K8S_NAMESPACE
       - echo "Deployment complete."
