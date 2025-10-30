@@ -1,33 +1,54 @@
 version: 0.2
 
+env:
+  variables:
+    IMAGE_PLACEHOLDER: "YOUR_IMAGE_PLACEHOLDER"
+
 phases:
   install:
     commands:
       - echo "Installing Kustomize..."
       - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-      - mv kustomize /usr/local/bin/
+      - if [ -f ./kustomize ]; then sudo mv ./kustomize /usr/local/bin/; else echo "kustomize binary not found!"; exit 1; fi
       - echo "Installing jq..."
-      - apt-get update && apt-get install -y jq
+      - curl -Lo /usr/local/bin/jq https://github.com/stedolan/jq/releases/latest/download/jq
+      - chmod +x /usr/local/bin/jq
   pre_build:
     commands:
-      # These $EKS_CLUSTER_NAME, $K8S_OVERLAY, $K8S_NAMESPACE
-      # variables are set in the CodePipeline configuration.
       - echo "Updating kubeconfig for cluster $EKS_CLUSTER_NAME..."
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
-      - echo "Parsing image definitions..."
-      # Read the image URI from the artifact passed by the CI stage
-      - IMAGE_URI=$(jq -r '.[0].imageUri' imagedefinitions.json)
-      - echo "Deploying image: $IMAGE_URI"
-  build:
-    commands:
-      - echo "Building Kustomize manifests for overlay $K8S_OVERLAY..."
       - |
-        kustomize build k8s/overlays/$K8S_OVERLAY \
-        | sed "s|YOUR_IMAGE_PLACEHOLDER|$IMAGE_URI|g" \
-        | kubectl apply -n $K8S_NAMESPACE -f -
+        if [ ! -f imagedefinitions.json ]; then
+          echo "Error: imagedefinitions.json not found!"
+          exit 1
+        fi
+        IMAGE_URI=$(jq -er '.[0].imageUri' imagedefinitions.json) || {
+          echo "Error: Failed to parse imagedefinitions.json or imageUri missing!"
+          exit 1
+        }
+        kustomize build k8s/overlays/$K8S_OVERLAY > /tmp/kustomized.yaml
+        # Validate that the placeholder exists before replacement
+        if ! grep -q "$IMAGE_PLACEHOLDER" /tmp/kustomized.yaml; then
+          echo "ERROR: Placeholder '$IMAGE_PLACEHOLDER' not found in manifest. Check your manifests."
+          exit 1
+        fi
+        sed -i "s|$IMAGE_PLACEHOLDER|$IMAGE_URI|g" /tmp/kustomized.yaml
+        echo "Applying manifests..."
+        kubectl apply -n $K8S_NAMESPACE -f /tmp/kustomized.yaml
   post_build:
-    commands:
-      - echo "Verifying deployment..."
+        # Wait for all deployments (with and without the app label) to roll out
+        for dep in $(kubectl -n $K8S_NAMESPACE get deployments -o name); do
+          echo "Waiting for $dep to roll out..."
+          kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
+        done
+        echo "Deployment complete."
       - |
-        kubectl rollout status deployment/$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}') -n $K8S_NAMESPACE
-      - echo "Deployment complete."
+        for dep in $(kubectl -n $K8S_NAMESPACE get deployments -l app=$APP_NAME -o name); do
+          echo "Waiting for $dep to roll out..."
+          kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
+        done
+        for dep in $(kubectl -n $K8S_NAMESPACE get deployments -o name); do
+          echo "Waiting for $dep to roll out..."
+          kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
+        done
+        echo "Deployment complete."
