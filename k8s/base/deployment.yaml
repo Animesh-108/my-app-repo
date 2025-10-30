@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-app-container # This name is important for imagedefinitions.json
+        image: YOUR_IMAGE_PLACEHOLDER # This will be replaced by the CD pipeline
+        ports:
+        - containerPort: 80
