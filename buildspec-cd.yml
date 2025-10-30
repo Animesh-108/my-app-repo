@@ -8,12 +8,15 @@ phases:
       - mv kustomize /usr/local/bin/
       - echo "Installing jq..."
       - apt-get update && apt-get install -y jq
-
+  
   pre_build:
     commands:
+      # These $EKS_CLUSTER_NAME, $K8S_OVERLAY, $K8S_NAMESPACE
+      # variables are set in the CodePipeline configuration.
       - echo "Updating kubeconfig for cluster $EKS_CLUSTER_NAME..."
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
       - echo "Parsing image definitions..."
+      # Read the image URI from the artifact passed by the CI stage
       - IMAGE_URI=$(jq -r '.[0].imageUri' imagedefinitions.json)
       - echo "Deploying image: $IMAGE_URI"
 
@@ -27,7 +30,7 @@ phases:
 
   post_build:
     commands:
-      - echo "Verifying deployment..."
+      - echo "Veriying deployment..."
       - |
         kubectl rollout status deployment/$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}') -n $K8S_NAMESPACE
       - echo "Deployment complete."
