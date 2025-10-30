@@ -20,15 +20,16 @@ phases:
   build:
     commands:
       - echo "Building Kustomize manifests for overlay $K8S_OVERLAY..."
-      - |
-        kustomize build k8s/overlays/$K8S_OVERLAY \
-        | sed "s|YOUR_IMAGE_PLACEHOLDER|$IMAGE_URI|g" \
-        | kubectl apply -n $K8S_NAMESPACE -f -
+      - >
+        kustomize build k8s/overlays/$K8S_OVERLAY |
+        sed "s|YOUR_IMAGE_PLACEHOLDER|$IMAGE_URI|g" |
+        kubectl apply -n $K8S_NAMESPACE -f -
 
   post_build:
     commands:
       - echo "Verifying deployment..."
-      - |
-        DEPLOYMENT_NAME=$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}')
+      - >
+        DEPLOYMENT_NAME=$(kustomize build k8s/overlays/$K8S_OVERLAY |
+        kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}')
         kubectl rollout status deployment/$DEPLOYMENT_NAME -n $K8S_NAMESPACE
       - echo "Deployment complete."
