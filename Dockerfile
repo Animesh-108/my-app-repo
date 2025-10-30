@@ -1,5 +1,5 @@
-# Use a small, official Node.js image
-FROM node:18-alpine
+# Use a small, official Node.js image from the ECR Public mirror
+FROM public.ecr.aws/docker/library/node:18-alpine
 
 # Create app directory
 WORKDIR /usr/src/app
