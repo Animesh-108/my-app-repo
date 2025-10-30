@@ -25,15 +25,23 @@ phases:
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
       - echo "Parsing image definitions..."
       - |
-        if [ ! -f imagedefinitions.json ]; then
-          echo "Error: imagedefinitions.json not found! This file should be an artifact from the 'Build' stage."
+        # =====================================================================
+        # THE FIX IS HERE:
+        # We must look for the file in the BuildArtifact directory.
+        # =====================================================================
+        ARTIFACT_FILE="$CODEBUILD_SRC_DIR_BuildArtifact/imagedefinitions.json"
+
+        if [ ! -f "$ARTIFACT_FILE" ]; then
+          echo "Error: $ARTIFACT_FILE not found!"
+          echo "This file should be an artifact from the 'Build' stage."
+          ls -l $CODEBUILD_SRC_DIR_BuildArtifact
           exit 1
         fi
         
-        # Safely parse the JSON file and handle errors
-        IMAGE_URI=$(jq -er '.[0].imageUri' imagedefinitions.json) || {
-          echo "Error: Failed to parse imagedefinitions.json or .imageUri key is missing!"
-          cat imagedefinitions.json
+        # Safely parse the JSON file from its correct path
+        IMAGE_URI=$(jq -er '.[0].imageUri' "$ARTIFACT_FILE") || {
+          echo "Error: Failed to parse $ARTIFACT_FILE or .imageUri key is missing!"
+          cat "$ARTIFACT_FILE"
           exit 1
         }
         
@@ -45,22 +53,21 @@ phases:
     commands:
       - echo "Building, validating, and applying Kustomize manifests..."
       - |
-        # 1. Build the manifest
+        # Build the manifest (from the primary source)
         kustomize build k8s/overlays/$K8S_OVERLAY > /tmp/kustomized.yaml
         
-        # 2. Validate that the placeholder exists before replacing
+        # Validate that the placeholder exists before replacing
         if ! grep -q "$IMAGE_PLACEHOLDER" /tmp/kustomized.yaml; then
           echo "ERROR: Placeholder '$IMAGE_PLACEHOLDER' not found in manifest."
-          echo "This might be okay if the image is already correct, but check your k8s/base/deployment.yaml."
-          # We will exit 1 to be safe, as the buildspec expects to replace it.
+          echo "Check your k8s/base/deployment.yaml."
           exit 1
         fi
         
-        # 3. Replace the placeholder with the real image URI
+        # Replace the placeholder with the real image URI
         echo "Replacing placeholder $IMAGE_PLACEHOLDER..."
         sed -i "s|$IMAGE_PLACEHOLDER|$IMAGE_URI|g" /tmp/kustomized.yaml
         
-        # 4. Apply the final manifest
+        # Apply the final manifest
         echo "Applying manifests to namespace $K8S_NAMESPACE..."
         kubectl apply -n $K8S_NAMESPACE -f /tmp/kustomized.yaml
 
