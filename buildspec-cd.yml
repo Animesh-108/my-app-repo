@@ -7,44 +7,68 @@ env:
 phases:
   install:
     commands:
-      - echo "Installing Kustomize..."
-      - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-      - if [ -f ./kustomize ]; then mv ./kustomize /usr/local/bin/; else echo "kustomize binary not found!"; exit 1; fi
-      - echo "Installing jq..."
-      - curl -Lo /usr/local/bin/jq https://github.com/stedolan/jq/releases/latest/download/jq-linux64
+      # Install Kustomize directly to avoid GitHub rate-limiting
+      - echo "Installing Kustomize v5.3.0..."
+      - curl -s -Lo kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.3.0/kustomize_v5.3.0_linux_amd64.tar.gz"
+      - tar -xzvf kustomize.tar.gz
+      - if [ -f ./kustomize ]; then mv kustomize /usr/local/bin/; else echo "Kustomize download failed!"; exit 1; fi
+      
+      # Install jq directly to avoid rate-limiting
+      - echo "Installing jq v1.7.1..."
+      - curl -s -Lo /usr/local/bin/jq "https://github.com/stedolan/jq/releases/download/jq-1.7.1/jq-linux-amd64"
       - chmod +x /usr/local/bin/jq
+      - jq --version # Verify install
+
   pre_build:
     commands:
       - echo "Updating kubeconfig for cluster $EKS_CLUSTER_NAME..."
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
+      - echo "Parsing image definitions..."
       - |
         if [ ! -f imagedefinitions.json ]; then
-          echo "Error: imagedefinitions.json not found!"
+          echo "Error: imagedefinitions.json not found! This file should be an artifact from the 'Build' stage."
           exit 1
         fi
+        
+        # Safely parse the JSON file and handle errors
         IMAGE_URI=$(jq -er '.[0].imageUri' imagedefinitions.json) || {
-          echo "Error: Failed to parse imagedefinitions.json or imageUri missing!"
+          echo "Error: Failed to parse imagedefinitions.json or .imageUri key is missing!"
+          cat imagedefinitions.json
           exit 1
         }
-        # Make IMAGE_URI available to later phases
-        export IMAGE_URI 
+        
+        # Export IMAGE_URI to be used in the build phase
+        export IMAGE_URI
+        echo "Image to deploy: $IMAGE_URI"
+
   build:
     commands:
-      - echo "Building and applying Kustomize manifests..."
+      - echo "Building, validating, and applying Kustomize manifests..."
       - |
+        # 1. Build the manifest
         kustomize build k8s/overlays/$K8S_OVERLAY > /tmp/kustomized.yaml
-        # Validate that the placeholder exists before replacement
+        
+        # 2. Validate that the placeholder exists before replacing
         if ! grep -q "$IMAGE_PLACEHOLDER" /tmp/kustomized.yaml; then
-          echo "ERROR: Placeholder '$IMAGE_PLACEHOLDER' not found in manifest. Check your manifests."
+          echo "ERROR: Placeholder '$IMAGE_PLACEHOLDER' not found in manifest."
+          echo "This might be okay if the image is already correct, but check your k8s/base/deployment.yaml."
+          # We will exit 1 to be safe, as the buildspec expects to replace it.
           exit 1
         fi
+        
+        # 3. Replace the placeholder with the real image URI
+        echo "Replacing placeholder $IMAGE_PLACEHOLDER..."
         sed -i "s|$IMAGE_PLACEHOLDER|$IMAGE_URI|g" /tmp/kustomized.yaml
-        echo "Applying manifests..."
+        
+        # 4. Apply the final manifest
+        echo "Applying manifests to namespace $K8S_NAMESPACE..."
         kubectl apply -n $K8S_NAMESPACE -f /tmp/kustomized.yaml
+
   post_build:
     commands:
       - |
         echo "Verifying all deployments in namespace $K8S_NAMESPACE..."
+        # Loop through ALL deployments in the namespace and check their status
         for dep in $(kubectl -n $K8S_NAMESPACE get deployments -o name); do
           echo "Waiting for $dep to roll out..."
           kubectl rollout status "$dep" -n $K8S_NAMESPACE --timeout=120s
