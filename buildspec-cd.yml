@@ -17,7 +17,7 @@ phases:
       - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
       - echo "Parsing image definitions..."
       # Read the image URI from the artifact passed by the CI stage
-      - IMAGE_URI=$(jq -r '.[0].imageUri' imagedefinitions.json)
+      - IMAGE_URI=$(jq -r '.[0].imageUri' imagedefinditions.json)
       - echo "Deploying image: $IMAGE_URI"
 
   build:
@@ -38,5 +38,5 @@ phases:
     commands:
       - echo "Verifying deployment..."
       - |
-        kubectl rollout status deployment/$(kustomize build ks8/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}') -n $K8S_NAMESPACE
+        kubectl rollout status deployment/$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}') -n $K8S_NAMESPACE
       - echo "Deployment complete."
