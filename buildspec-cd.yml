@@ -29,5 +29,6 @@ phases:
     commands:
       - echo "Verifying deployment..."
       - |
-        kubectl rollout status deployment/$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}') -n $K8S_NAMESPACE
+        DEPLOYMENT_NAME=$(kustomize build k8s/overlays/$K8S_OVERLAY | kubectl apply -f - -n $K8S_NAMESPACE -o=jsonpath='{.metadata.name}')
+        kubectl rollout status deployment/$DEPLOYMENT_NAME -n $K8S_NAMESPACE
       - echo "Deployment complete."
